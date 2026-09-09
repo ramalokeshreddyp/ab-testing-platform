@@ -1,0 +1,26 @@
+[MASTER]
+ignore=venv,.venv,build,dist
+jobs=0
+
+[MESSAGES CONTROL]
+disable=
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    too-few-public-methods,
+    no-name-in-module,
+    broad-exception-caught,
+    redefined-builtin,
+    import-error,
+    global-statement,
+    unused-argument,
+    invalid-name,
+    not-callable,
+    too-many-return-statements
+
+[FORMAT]
+max-line-length=120
+
+[DESIGN]
+max-args=8
+max-attributes=10

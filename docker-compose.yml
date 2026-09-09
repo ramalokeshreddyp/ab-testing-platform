@@ -1,0 +1,132 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: ab_testing_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ab_testing_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ab_testing_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  cache:
+    image: redis:7-alpine
+    container_name: ab_testing_cache
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 3s
+
+  queue:
+    image: rabbitmq:3.12-management-alpine
+    container_name: ab_testing_queue
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  config-api:
+    build:
+      context: .
+      dockerfile: config_api/Dockerfile
+    container_name: ab_testing_config_api
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/ab_testing_db
+      - REDIS_URL=redis://cache:6379/0
+      - RABBITMQ_URL=amqp://guest:guest@queue:5672/
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  cache-updater:
+    build:
+      context: .
+      dockerfile: cache_updater/Dockerfile
+    container_name: ab_testing_cache_updater
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/ab_testing_db
+      - REDIS_URL=redis://cache:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  decision-engine:
+    build:
+      context: .
+      dockerfile: decision_engine/Dockerfile
+    container_name: ab_testing_decision_engine
+    ports:
+      - "8002:8002"
+    environment:
+      - REDIS_URL=redis://cache:6379/0
+      - EVENT_API_URL=http://event-api:8000/events
+    depends_on:
+      cache:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  event-api:
+    build:
+      context: .
+      dockerfile: event_api/Dockerfile
+    container_name: ab_testing_event_api
+    ports:
+      - "8000:8000"
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@queue:5672/
+    depends_on:
+      queue:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  postgres_data:
